@@ -13,10 +13,8 @@ bool KnightBasic::isValid(int x, int y) const {
 }
 
 bool KnightBasic::findTour(int x, int y, int step) {
-    // Пометить текущую клетку
     board.board[x][y] = step;
 
-    // Проверить завершение
     if (step == board.size * board.size) {
         return true;
     }
