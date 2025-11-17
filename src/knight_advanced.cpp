@@ -43,13 +43,15 @@ bool KnightAdvanced::findTourWarnsdorff(int x, int y, int step) {
             options.push_back({{new_x, new_y}, degree});
         }
     }
-    
+    // TODO: O(n log n) где n - размер доски, но тк n <= 8: то можем считать О(1)
     // Сортируем по возрастанию степени (правило Варнсдорфа)
     std::sort(options.begin(), options.end(), 
               [](const MoveOption& a, const MoveOption& b) {
                   return a.degree < b.degree;
               });
     
+
+    // TODO: O(n) где n - размер доски, но тк n <= 8: то можем считать О(1)
     // Пробуем ходы в порядке от наименьшей степени
     for (const auto& option : options) {
         if (findTourWarnsdorff(option.pos.x, option.pos.y, step + 1)) {
@@ -98,3 +100,13 @@ void KnightAdvanced::printSolution() const {
         std::cout << std::endl;
     }
 }
+
+// TODO:
+// T(n) = стоимость_посещения(n² клеток)
+
+// T(n) = n² × [проверка_8_ходов + подсчет_степеней + сортировка_8_элементов]
+
+// T(n) = n² × [O(8) + O(8) + O(8×log₂8)] 
+//       = n² × [O(1) + O(1) + O(8×3)]
+//       = n² × O(1) 
+//       = O(n²)

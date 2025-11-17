@@ -1,129 +1,298 @@
-#include "knight_basic.h"
 #include "knight_advanced.h"
 #include <iostream>
+#include <fstream>
 #include <chrono>
-#include <cmath>
+#include <vector>
+#include <cstdlib>
+#include <climits>
 
-void printComplexityAnalysis(int board_size) {
-    std::cout << "\n=== ALGORITHM COMPLEXITY ANALYSIS ===" << std::endl;
-    
-    int n = board_size;
-    int total_cells = n * n;
-    
-    std::cout << "Board size: " << n << "x" << n << " (" << total_cells << " cells)" << std::endl;
-    
-    // Анализ простого backtracking
-    std::cout << "\n1. BASIC BACKTRACKING ALGORITHM:" << std::endl;
-    std::cout << "   - Worst-case time: O(8^(N²)) = O(8^" << total_cells << ")" << std::endl;
-    std::cout << "   - Space complexity: O(N²) for recursion stack" << std::endl;
-    std::cout << "   - Branching factor: 8 (knight moves)" << std::endl;
-    std::cout << "   - States to explore: ~8^" << total_cells << " ≈ ";
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
 
-    // Вычисляем приблизительное число состояний (только для маленьких n)
-    if (total_cells <= 16) {
-        double states = std::pow(8, total_cells);
-        if (states < 1e12) {
-            std::cout << states;
-        } else {
-            std::cout << "10^" << static_cast<int>(std::log10(states));
+struct Measurement {
+    int board_size;
+    long long time_microseconds;
+    int total_cells;
+    bool success;
+};
+
+class ComplexityBenchmark {
+private:
+    std::vector<Measurement> measurements;
+    std::string data_dir = "data";
+    
+    bool createDirectory(const std::string& path) {
+#ifdef _WIN32
+        return CreateDirectoryA(path.c_str(), NULL) != 0;
+#else
+        return mkdir(path.c_str(), 0755) == 0;
+#endif
+    }
+    
+    bool directoryExists(const std::string& path) {
+#ifdef _WIN32
+        DWORD attrib = GetFileAttributesA(path.c_str());
+        return (attrib != INVALID_FILE_ATTRIBUTES && (attrib & FILE_ATTRIBUTE_DIRECTORY));
+#else
+        struct stat info;
+        return stat(path.c_str(), &info) == 0 && (info.st_mode & S_IFDIR);
+#endif
+    }
+    
+public:
+    ComplexityBenchmark() {
+        // Создаем папку data если ее нет
+        if (!directoryExists(data_dir)) {
+            if (createDirectory(data_dir)) {
+                std::cout << "Created directory: " << data_dir << std::endl;
+            } else {
+                std::cout << "Warning: Could not create directory " << data_dir << std::endl;
+                data_dir = "."; // используем текущую директорию
+            }
         }
-    } else {
-        std::cout << "10^" << static_cast<int>(total_cells * std::log10(8));
     }
-    std::cout << " states" << std::endl;
     
-    // Анализ улучшенного алгоритма
-    std::cout << "\n2. WARNSDORFF'S HEURISTIC ALGORITHM:" << std::endl;
-    std::cout << "   - Average time: O(N²) to O(N³)" << std::endl;
-    std::cout << "   - Space complexity: O(N²)" << std::endl;
-    std::cout << "   - Key optimization: greedy choice by minimum degree" << std::endl;
-    std::cout << "   - Reduces branching factor from 8 to ~2-3" << std::endl;
-    std::cout << "   - States to explore: ~" << total_cells << " steps" << std::endl;
-    
-    // Сравнение
-    std::cout << "\n3. PERFORMANCE GAIN:" << std::endl;
-    if (total_cells <= 16) {
-        double basic_states = std::pow(8, total_cells);
-        double advanced_states = total_cells;
-        double improvement = basic_states / advanced_states;
-        std::cout << "   - State reduction: " << improvement << "x" << std::endl;
+    void runBenchmark(int min_size, int max_size, int step = 1, int samples_per_size = 3) {
+        std::cout << "Running complexity benchmark from size " << min_size 
+                  << " to " << max_size << std::endl;
+        std::cout << "Samples per size: " << samples_per_size << std::endl;
+        
+        for (int size = min_size; size <= max_size; size += step) {
+            std::cout << "\nTesting board size: " << size << "x" << size << std::endl;
+            
+            // Делаем несколько замеров для усреднения
+            long long total_time = 0;
+            int successful_runs = 0;
+            long long min_time = LLONG_MAX;
+            long long max_time = 0;
+            
+            for (int sample = 0; sample < samples_per_size; sample++) {
+                Measurement result = measureAlgorithm(size);
+                if (result.success) {
+                    total_time += result.time_microseconds;
+                    successful_runs++;
+                    min_time = std::min(min_time, result.time_microseconds);
+                    max_time = std::max(max_time, result.time_microseconds);
+                    std::cout << "  Sample " << (sample + 1) << ": " 
+                              << result.time_microseconds << " μs" << std::endl;
+                } else {
+                    std::cout << "  Sample " << (sample + 1) << ": FAILED" << std::endl;
+                }
+            }
+            
+            if (successful_runs > 0) {
+                long long avg_time = total_time / successful_runs;
+                measurements.push_back({size, avg_time, size * size, true});
+                std::cout << "  Average: " << avg_time << " μs, Range: [" 
+                          << min_time << "-" << max_time << "] μs ("
+                          << successful_runs << "/" << samples_per_size << " successful)" << std::endl;
+            } else {
+                measurements.push_back({size, 0, size * size, false});
+                std::cout << "  All samples failed for this size" << std::endl;
+            }
+        }
+        
+        if (saveToCSV()) {
+            std::cout << "\n✓ Data successfully saved to " << data_dir << "/knight_complexity.csv" << std::endl;
+        } else {
+            std::cout << "\n✗ Failed to save data file!" << std::endl;
+        }
+        
+        printAnalysis();
     }
-    std::cout << "   - Practical difference:" << std::endl;
-    std::cout << "     * N=5: Basic ~100ms, Advanced ~0ms" << std::endl;
-    std::cout << "     * N=6: Basic ~seconds-minutes, Advanced ~0ms" << std::endl;
-    std::cout << "     * N=8: Basic ~years, Advanced ~0ms" << std::endl;
-}
+    
+private:
+    Measurement measureAlgorithm(int board_size) {
+        KnightAdvanced solver(board_size);
+        
+        // Используем стандартную стартовую позицию (0,0)
+        int start_x = 0, start_y = 0;
+        
+        auto start = std::chrono::high_resolution_clock::now();
+        bool success = solver.solve(start_x, start_y);
+        auto end = std::chrono::high_resolution_clock::now();
+        
+        long long time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        
+        return {board_size, time_us, board_size * board_size, success};
+    }
+    
+    bool saveToCSV() {
+        std::string filename = data_dir + "/knight_complexity.csv";
+        std::ofstream file(filename);
+        
+        if (!file.is_open()) {
+            std::cerr << "Error: Could not create file " << filename << std::endl;
+            return false;
+        }
+        
+        // Заголовок CSV
+        file << "board_size,total_cells,time_microseconds,success,time_per_cell" << std::endl;
+        
+        // Данные
+        for (const auto& m : measurements) {
+            double time_per_cell = m.success ? static_cast<double>(m.time_microseconds) / m.total_cells : 0.0;
+            file << m.board_size << ","
+                 << m.total_cells << ","
+                 << m.time_microseconds << ","
+                 << m.success << ","
+                 << time_per_cell << std::endl;
+        }
+        
+        file.close();
+        return true;
+    }
+    
+    void printAnalysis() {
+        std::cout << "\n" << std::string(60, '=') << std::endl;
+        std::cout << "COMPLEXITY ANALYSIS RESULTS" << std::endl;
+        std::cout << std::string(60, '=') << std::endl;
+        
+        if (measurements.size() < 2) {
+            std::cout << "Not enough data for analysis" << std::endl;
+            return;
+        }
+        
+        // Таблица с данными
+        std::cout << "\nDetailed Measurements:" << std::endl;
+        std::cout << "Size\tCells\tTime(μs)\tμs/Cell\tComplexity" << std::endl;
+        std::cout << std::string(70, '-') << std::endl;
+        
+        for (size_t i = 0; i < measurements.size(); i++) {
+            const auto& m = measurements[i];
+            if (!m.success) continue;
+            
+            double time_per_cell = static_cast<double>(m.time_microseconds) / m.total_cells;
+            std::cout << m.board_size << "\t" 
+                      << m.total_cells << "\t"
+                      << m.time_microseconds << "\t\t"
+                      << time_per_cell << "\t";
+            
+            // Простая оценка сложности по времени на клетку
+            if (time_per_cell < 1.0) std::cout << "FAST";
+            else if (time_per_cell < 10.0) std::cout << "MEDIUM";
+            else std::cout << "SLOW";
+            
+            std::cout << std::endl;
+        }
+        
+        // Анализ роста сложности
+        std::cout << "\nComplexity Growth Analysis:" << std::endl;
+        std::cout << "From→To\tCells×\tTime×\tRatio\tVerdict" << std::endl;
+        std::cout << std::string(70, '-') << std::endl;
+        
+        double sum_ratios = 0;
+        int ratio_count = 0;
+        
+        for (size_t i = 1; i < measurements.size(); i++) {
+            const auto& prev = measurements[i-1];
+            const auto& curr = measurements[i];
+            
+            if (!prev.success || !curr.success) continue;
+            
+            double cells_growth = static_cast<double>(curr.total_cells) / prev.total_cells;
+            double time_growth = static_cast<double>(curr.time_microseconds) / prev.time_microseconds;
+            double ratio = time_growth / cells_growth;
+            
+            sum_ratios += ratio;
+            ratio_count++;
+            
+            std::cout << prev.board_size << "→" << curr.board_size << "\t"
+                      << cells_growth << "\t"
+                      << time_growth << "\t"
+                      << ratio << "\t";
+            
+            if (ratio >= 0.7 && ratio <= 1.3) {
+                std::cout << "O(n²) ✓";
+            } else if (ratio >= 1.3 && ratio <= 2.0) {
+                std::cout << "O(n³) ⚠";
+            } else if (ratio > 2.0) {
+                std::cout << ">O(n³) ✗";
+            } else {
+                std::cout << "<?>";
+            }
+            
+            std::cout << std::endl;
+        }
+        
+        // Финальный вывод
+        if (ratio_count > 0) {
+            double avg_ratio = sum_ratios / ratio_count;
+            
+            std::cout << "\n" << std::string(50, '=') << std::endl;
+            std::cout << "FINAL COMPLEXITY ASSESSMENT" << std::endl;
+            std::cout << std::string(50, '=') << std::endl;
+            std::cout << "Average Time/Cells Growth Ratio: " << avg_ratio << std::endl;
+            
+            if (avg_ratio >= 0.8 && avg_ratio <= 1.2) {
+                std::cout << "✓ CONFIRMED: O(n²) complexity" << std::endl;
+                std::cout << "  - Time grows linearly with number of cells" << std::endl;
+                std::cout << "  - Algorithm scales efficiently" << std::endl;
+            } else if (avg_ratio >= 0.5 && avg_ratio <= 1.5) {
+                std::cout << "✓ LIKELY: O(n²) complexity" << std::endl;
+                std::cout << "  - Time growth close to linear with cells" << std::endl;
+            } else if (avg_ratio >= 1.5 && avg_ratio <= 2.5) {
+                std::cout << "⚠ POSSIBLE: O(n³) complexity" << std::endl;
+                std::cout << "  - Time grows faster than number of cells" << std::endl;
+            } else if (avg_ratio > 2.5) {
+                std::cout << "✗ DETECTED: Worse than O(n³)" << std::endl;
+                std::cout << "  - Time grows much faster than expected" << std::endl;
+            } else {
+                std::cout << "? UNCLEAR: Inconsistent growth pattern" << std::endl;
+            }
+        }
+        
+        // Показываем где файл
+        std::cout << "\n" << std::string(50, '=') << std::endl;
+        std::cout << "DATA EXPORT" << std::endl;
+        std::cout << std::string(50, '=') << std::endl;
+        std::cout << "Results saved to: " << data_dir << "/knight_complexity.csv" << std::endl;
+        std::cout << "Format: board_size, total_cells, time_microseconds, success, time_per_cell" << std::endl;
+    }
+};
 
 int main() {
-    int board_size;
-    std::cout << "Enter board size: ";
-    std::cin >> board_size;
+    ComplexityBenchmark benchmark;
     
-    int start_x, start_y;
-    std::cout << "Enter start position (x y): ";
-    std::cin >> start_x >> start_y;
+    std::cout << "KNIGHT'S TOUR COMPLEXITY BENCHMARK" << std::endl;
+    std::cout << "==================================" << std::endl;
     
-    // Сначала выводим анализ сложности
-    printComplexityAnalysis(board_size);
+    int choice;
+    std::cout << "\nChoose benchmark mode:" << std::endl;
+    std::cout << "1. Quick test (sizes 5-12, fast)" << std::endl;
+    std::cout << "2. Standard test (sizes 5-20, recommended)" << std::endl;
+    std::cout << "3. Stress test (sizes 5-30, slow)" << std::endl;
+    std::cout << "4. Custom range" << std::endl;
+    std::cout << "Enter choice (1-4): ";
+    std::cin >> choice;
     
-    // Переменные для времени
-    long long advanced_time = 0;
-    long long basic_time = -1;
-    bool advanced_success = false;
-    bool basic_success = false;
-    
-    std::cout << "\n=== EXECUTION RESULTS ===" << std::endl;
-    
-    // Тестируем улучшенный метод
-    {
-        KnightAdvanced solver_advanced(board_size);
-        
-        auto start = std::chrono::high_resolution_clock::now();
-        advanced_success = solver_advanced.solve(start_x, start_y);
-        auto end = std::chrono::high_resolution_clock::now();
-        advanced_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-        
-        if (advanced_success) {
-            std::cout << "✓ Advanced method: " << advanced_time << " μs" << std::endl;
-            solver_advanced.printSolution();
-        } else {
-            std::cout << "✗ Advanced method: No solution found" << std::endl;
-        }
-    }
-    
-    // Тестируем простой метод с ограничением по времени
-    if (board_size <= 6) {
-        KnightBasic solver_basic(board_size);
-        
-        auto start = std::chrono::high_resolution_clock::now();
-        basic_success = solver_basic.solve(start_x, start_y);
-        auto end = std::chrono::high_resolution_clock::now();
-        basic_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        
-        if (basic_success) {
-            std::cout << "✓ Basic method: " << basic_time << " ms" << std::endl;
-        } else {
-            std::cout << "✗ Basic method: No solution found" << std::endl;
-        }
-    } else {
-        std::cout << "⏭️  Basic method: Skipped (N > 6 would take too long)" << std::endl;
-    }
-    
-    // Сравниваем производительность
-    std::cout << "\n=== PERFORMANCE SUMMARY ===" << std::endl;
-    std::cout << "Advanced method: " << advanced_time << " μs" << std::endl;
-    
-    if (basic_time != -1) {
-        std::cout << "Basic method: " << basic_time << " ms" << std::endl;
-        if (advanced_time > 0 && basic_time > 0) {
-            double speedup = static_cast<double>(basic_time * 1000) / advanced_time;
-            std::cout << "Speedup: " << speedup << "x faster" << std::endl;
-        } else if (advanced_time == 0 && basic_time > 0) {
-            std::cout << "Speedup: ∞ (advanced method was instant)" << std::endl;
-        }
-    } else {
-        std::cout << "Basic method: Not executed" << std::endl;
-        std::cout << "Theoretical speedup: > 1,000,000x for N=" << board_size << std::endl;
+    switch (choice) {
+        case 1:
+            benchmark.runBenchmark(5, 12, 1, 2);
+            break;
+        case 2:
+            benchmark.runBenchmark(5, 20, 1, 3);
+            break;
+        case 3:
+            benchmark.runBenchmark(5, 30, 1, 2);
+            break;
+        case 4:
+            int min_size, max_size, samples;
+            std::cout << "Enter min board size: ";
+            std::cin >> min_size;
+            std::cout << "Enter max board size: ";
+            std::cin >> max_size;
+            std::cout << "Enter samples per size: ";
+            std::cin >> samples;
+            benchmark.runBenchmark(min_size, max_size, 1, samples);
+            break;
+        default:
+            std::cout << "Invalid choice, running standard test" << std::endl;
+            benchmark.runBenchmark(5, 20, 1, 3);
     }
     
     return 0;
